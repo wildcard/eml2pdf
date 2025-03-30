@@ -2,10 +2,10 @@ import argparse
 import email
 from email import policy
 from pathlib import Path
-import multiprocessing
 import traceback
 import os
 import csv
+import multiprocessing
 from weasyprint import HTML
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from tqdm import tqdm
@@ -39,31 +39,18 @@ def extract_invoice_data(text):
 def render_pdf_safe(body_html, pdf_path, log_path):
     try:
         HTML(string=body_html).write_pdf(str(pdf_path))
-        print(f"[+] Saved email body as PDF: {pdf_path.name}")
     except Exception as e:
         with open(log_path, "w") as f:
             f.write("PDF rendering failed:\n")
             traceback.print_exc(file=f)
-        print(f"[!] Failed to render PDF: {pdf_path.name} (logged to {log_path.name})")
 
-def process_eml_file(eml_path: Path, output_dir: Path):
+def process_eml_file(eml_path: Path, output_dir: Path, verbose: bool = False):
     try:
         with open(eml_path, 'rb') as f:
             msg = email.message_from_binary_file(f, policy=policy.default)
     except Exception as e:
-        print(f"[!] Failed to open {eml_path.name}: {e}")
-        return {
-            "file": eml_path.name,
-            "from": "",
-            "subject": "",
-            "date": "",
-            "attachments": 0,
-            "body_rendered": False,
-            "crashed": True,
-            "amount_paid": "",
-            "invoice_date": "",
-            "vendor": ""
-        }
+        tqdm.write(f"[!] Failed to open {eml_path.name}: {e}")
+        return basic_result(eml_path.name, crashed=True)
 
     eml_name = eml_path.stem
     extracted = 0
@@ -80,7 +67,6 @@ def process_eml_file(eml_path: Path, output_dir: Path):
     domain = email_part.split("@")[-1]
     vendor = domain.split(".")[0].capitalize() if domain else ""
 
-    # Extract PDF attachments
     for part in msg.iter_attachments():
         filename = part.get_filename()
         content_type = part.get_content_type()
@@ -88,10 +74,10 @@ def process_eml_file(eml_path: Path, output_dir: Path):
             attachment_path = output_dir / f"{eml_name}__{filename}"
             with open(attachment_path, 'wb') as f:
                 f.write(part.get_payload(decode=True))
-            print(f"[+] Extracted attachment: {attachment_path.name}")
             extracted += 1
+            if verbose:
+                tqdm.write(f"[📎] {attachment_path.name}")
 
-    # Extract email body
     body = None
     if msg.is_multipart():
         for part in msg.walk():
@@ -111,29 +97,27 @@ def process_eml_file(eml_path: Path, output_dir: Path):
         pdf_path = output_dir / f"{eml_name}.pdf"
         log_path = LOG_DIR / f"render_fail_{eml_name}.log"
 
-        # Extract amount + invoice date
         try:
-            if "html" in msg.get_content_type():
-                soup = BeautifulSoup(body, "html.parser")
-                plain_text = soup.get_text()
-            else:
-                plain_text = body
+            plain_text = BeautifulSoup(body, "html.parser").get_text() if "html" in msg.get_content_type() else body
             amount_paid, invoice_date = extract_invoice_data(plain_text)
+
+            proc = multiprocessing.Process(target=render_pdf_safe, args=(body, pdf_path, log_path))
+            proc.start()
+            proc.join(timeout=30)
+
+            if proc.exitcode == 0:
+                rendered = True
+                if verbose:
+                    tqdm.write(f"[📝] {pdf_path.name}")
+            else:
+                crashed = True
+                tqdm.write(f"[!] PDF render crash for {pdf_path.name} — see {log_path.name}")
         except Exception as e:
-            print(f"[!] Failed to parse invoice data in {eml_name}: {e}")
-
-        # Render body to PDF
-        proc = multiprocessing.Process(target=render_pdf_safe, args=(body, pdf_path, log_path))
-        proc.start()
-        proc.join(timeout=30)
-
-        if proc.exitcode == 0:
-            rendered = True
-        else:
             crashed = True
-            print(f"[!] PDF rendering crashed for {eml_name} — see log: {log_path.name}")
+            tqdm.write(f"[!] Exception during rendering: {e}")
     else:
-        print(f"[!] No body content in {eml_name}")
+        if verbose:
+            tqdm.write(f"[!] No body content in {eml_name}")
 
     return {
         "file": eml_path.name,
@@ -148,14 +132,29 @@ def process_eml_file(eml_path: Path, output_dir: Path):
         "vendor": vendor
     }
 
+def basic_result(filename, crashed=False):
+    return {
+        "file": filename,
+        "from": "",
+        "subject": "",
+        "date": "",
+        "attachments": 0,
+        "body_rendered": False,
+        "crashed": crashed,
+        "amount_paid": "",
+        "invoice_date": "",
+        "vendor": ""
+    }
+
 def main():
     parser = argparse.ArgumentParser(description="Extract PDF attachments and convert EML bodies to PDF.")
     parser.add_argument("folder", type=str, help="Folder containing .eml files")
+    parser.add_argument("--verbose", action="store_true", help="Show detailed processing logs")
     args = parser.parse_args()
 
     input_dir = Path(args.folder)
     if not input_dir.exists() or not input_dir.is_dir():
-        print(f"❌ Invalid folder path: {input_dir}")
+        tqdm.write(f"❌ Invalid folder path: {input_dir}")
         return
 
     output_dir = input_dir / "output"
@@ -163,7 +162,7 @@ def main():
 
     eml_files = list(input_dir.glob("*.eml"))
     if not eml_files:
-        print("No .eml files found.")
+        tqdm.write("No .eml files found.")
         return
 
     total = len(eml_files)
@@ -173,15 +172,15 @@ def main():
     report_rows = []
     num_workers = os.cpu_count() or 4
 
-    print(f"⚙️ Processing {total} files with {num_workers} workers...\n")
+    tqdm.write(f"⚙️ Processing {total} files with {num_workers} workers...\n")
 
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
         futures = {
-            executor.submit(process_eml_file, eml_path, output_dir): eml_path
+            executor.submit(process_eml_file, eml_path, output_dir, args.verbose): eml_path
             for eml_path in eml_files
         }
 
-        for future in tqdm(as_completed(futures), total=len(futures), desc="Processing"):
+        for future in tqdm(as_completed(futures), total=len(futures), desc="Processing", ncols=80):
             eml_path = futures[future]
             try:
                 result = future.result()
@@ -202,13 +201,12 @@ def main():
                     result["amount_paid"]
                 ])
             except Exception as e:
-                print(f"[!] Exception while processing {eml_path.name}: {e}")
                 failed += 1
+                tqdm.write(f"[!] Error in worker: {e}")
                 report_rows.append([
                     eml_path.name, "", "", "", "", "", "no", 0, "yes", ""
                 ])
 
-    # ✅ Write CSV summary
     report_path = output_dir / "receipt_report.csv"
     try:
         with open(report_path, "w", newline="") as csvfile:
@@ -218,11 +216,10 @@ def main():
                 "Invoice Date", "Body PDF", "Attachments", "Crashed", "Amount Paid"
             ])
             writer.writerows(report_rows)
-        print(f"📁 CSV report saved to: {report_path}")
+        tqdm.write(f"\n📁 CSV report saved to: {report_path}")
     except Exception as e:
-        print(f"[!] Failed to write CSV report: {e}")
+        tqdm.write(f"[!] Failed to write CSV: {e}")
 
-    # ✅ Final stats
     print(f"\n📊 Processing Complete:")
     print(f"   • Total .eml files processed: {total}")
     print(f"   • PDF attachments extracted: {attachments}")
