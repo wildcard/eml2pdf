@@ -1,15 +1,26 @@
+attrs==25.3.0
+beautifulsoup4==4.13.3
 brotli==1.1.0
 cffi==1.17.1
 cssselect2==0.8.0
+dateparser==1.2.1
 -e file:///Users/kobi/personal/tax-tools/eml2pdf
 fonttools==4.56.0
 pillow==11.1.0
+price-parser==0.4.0
 pycparser==2.22
 pydyf==0.11.0
 pyphen==0.17.2
+python-dateutil==2.9.0.post0
+pytz==2025.2
+regex==2024.11.6
+six==1.17.0
+soupsieve==2.6
 tinycss2==1.4.0
 tinyhtml5==2.0.0
 tqdm==4.67.1
+typing-extensions==4.13.0
+tzlocal==5.3.1
 weasyprint==65.0
 webencodings==0.5.1
 zopfli==0.2.3.post1

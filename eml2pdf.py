@@ -5,12 +5,36 @@ from pathlib import Path
 import multiprocessing
 import traceback
 import os
+import csv
 from weasyprint import HTML
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from tqdm import tqdm
+from bs4 import BeautifulSoup
+from price_parser import Price
+import dateparser
 
 LOG_DIR = Path("logs")
 LOG_DIR.mkdir(exist_ok=True)
+
+def extract_invoice_data(text):
+    amount = ""
+    invoice_date = ""
+
+    for line in text.splitlines():
+        if not amount:
+            price = Price.fromstring(line)
+            if price.amount is not None:
+                amount = str(price.amount)
+
+        if not invoice_date:
+            dt = dateparser.parse(line, settings={"STRICT_PARSING": True})
+            if dt:
+                invoice_date = dt.strftime("%Y-%m-%d")
+
+        if amount and invoice_date:
+            break
+
+    return amount, invoice_date
 
 def render_pdf_safe(body_html, pdf_path, log_path):
     try:
@@ -28,12 +52,33 @@ def process_eml_file(eml_path: Path, output_dir: Path):
             msg = email.message_from_binary_file(f, policy=policy.default)
     except Exception as e:
         print(f"[!] Failed to open {eml_path.name}: {e}")
-        return 0, False, True  # attachments, rendered, crashed
+        return {
+            "file": eml_path.name,
+            "from": "",
+            "subject": "",
+            "date": "",
+            "attachments": 0,
+            "body_rendered": False,
+            "crashed": True,
+            "amount_paid": "",
+            "invoice_date": "",
+            "vendor": ""
+        }
 
     eml_name = eml_path.stem
     extracted = 0
     rendered = False
     crashed = False
+    amount_paid = ""
+    invoice_date = ""
+
+    from_header = msg.get("From", "")
+    if "<" in from_header and ">" in from_header:
+        email_part = from_header.split("<")[1].split(">")[0]
+    else:
+        email_part = from_header
+    domain = email_part.split("@")[-1]
+    vendor = domain.split(".")[0].capitalize() if domain else ""
 
     # Extract PDF attachments
     for part in msg.iter_attachments():
@@ -66,6 +111,18 @@ def process_eml_file(eml_path: Path, output_dir: Path):
         pdf_path = output_dir / f"{eml_name}.pdf"
         log_path = LOG_DIR / f"render_fail_{eml_name}.log"
 
+        # Extract text for amount/date
+        try:
+            if "html" in msg.get_content_type():
+                soup = BeautifulSoup(body, "html.parser")
+                plain_text = soup.get_text()
+            else:
+                plain_text = body
+            amount_paid, invoice_date = extract_invoice_data(plain_text)
+        except Exception as e:
+            print(f"[!] Failed to parse invoice data in {eml_name}: {e}")
+
+        # Render PDF in subprocess
         proc = multiprocessing.Process(target=render_pdf_safe, args=(body, pdf_path, log_path))
         proc.start()
         proc.join(timeout=30)
@@ -78,7 +135,18 @@ def process_eml_file(eml_path: Path, output_dir: Path):
     else:
         print(f"[!] No body content in {eml_name}")
 
-    return extracted, rendered, crashed
+    return {
+        "file": eml_path.name,
+        "from": from_header,
+        "subject": msg.get("Subject", ""),
+        "date": msg.get("Date", ""),
+        "attachments": extracted,
+        "body_rendered": rendered,
+        "crashed": crashed,
+        "amount_paid": amount_paid,
+        "invoice_date": invoice_date,
+        "vendor": vendor
+    }
 
 def main():
     parser = argparse.ArgumentParser(description="Extract PDF attachments and convert EML bodies to PDF.")
@@ -102,6 +170,7 @@ def main():
     attachments = 0
     body_pdfs = 0
     failed = 0
+    report_rows = []
     num_workers = os.cpu_count() or 4
 
     print(f"⚙️ Processing {total} files with {num_workers} workers...\n")
@@ -115,19 +184,46 @@ def main():
         for future in tqdm(as_completed(futures), total=len(futures), desc="Processing"):
             eml_path = futures[future]
             try:
-                extracted, rendered, error = future.result()
-                attachments += extracted
-                body_pdfs += int(rendered)
-                failed += int(error)
+                result = future.result()
+                attachments += result["attachments"]
+                body_pdfs += int(result["body_rendered"])
+                failed += int(result["crashed"])
+
+                report_rows.append([
+                    result["file"],
+                    result["vendor"],
+                    result["from"],
+                    result["subject"],
+                    result["date"],
+                    result["invoice_date"],
+                    "yes" if result["body_rendered"] else "no",
+                    result["attachments"],
+                    "yes" if result["crashed"] else "no",
+                    result["amount_paid"]
+                ])
             except Exception as e:
                 print(f"[!] Exception while processing {eml_path.name}: {e}")
                 failed += 1
+                report_rows.append([
+                    eml_path.name, "", "", "", "", "", "no", 0, "yes", ""
+                ])
 
-    print("\n📊 Processing Complete:")
+    # Write CSV summary
+    report_path = output_dir / "receipt_report.csv"
+    with open(report_path, "w", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow([
+            "File", "Vendor", "From", "Subject", "Email Date",
+            "Invoice Date", "Body PDF", "Attachments", "Crashed", "Amount Paid"
+        ])
+        writer.writerows(report_rows)
+
+    print(f"\n📊 Processing Complete:")
     print(f"   • Total .eml files processed: {total}")
     print(f"   • PDF attachments extracted: {attachments}")
     print(f"   • Email bodies converted to PDF: {body_pdfs}")
     print(f"   • Failures: {failed}")
+    print(f"   • CSV report saved to: {report_path}")
 
 if __name__ == "__main__":
     main()

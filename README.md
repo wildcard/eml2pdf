@@ -1,19 +1,21 @@
 # 📧 eml2pdf
 
-A command-line tool to extract PDF attachments and convert email body content from `.eml` files to clean, searchable PDFs.
-
-Perfect for automating invoice/receipt archiving, especially when dealing with vendors, subscriptions, or digital receipts.
+A command-line tool to extract PDF attachments and convert email body content from `.eml` files to clean, searchable PDFs — with full metadata captured in a CSV report.
 
 ---
 
 ## ✨ Features
 
-- ✅ Extracts **all PDF attachments** from `.eml` files
-- 📝 Converts **email body content** (HTML or plain text) to a `.pdf`
-- 🧠 Automatically detects multipart content and falls back to plain text
-- 🛡️ Handles **PDF rendering crashes** via subprocess isolation
-- 📋 **Summary report** at the end of batch processing
-- 📂 Outputs organized in `output/` and crash logs in `logs/`
+- ✅ Extracts **PDF attachments** from `.eml` files
+- 📝 Converts **email body** to a `.pdf`
+- 🧠 Uses `beautifulsoup4`, `price-parser`, and `dateparser` to extract:
+  - 💰 **Amount Paid**
+  - 🧾 **Invoice Date**
+  - 🏢 **Vendor** (from sender address)
+- 📋 Outputs **receipt_report.csv** with all metadata
+- 🛡️ Crash-isolated PDF rendering with `multiprocessing`
+- ⚡ Parallel processing (auto-tuned to CPU cores)
+- 📊 Real-time progress bar with `tqdm`
 
 ---
 
