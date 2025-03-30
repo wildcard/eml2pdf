@@ -1,0 +1,11 @@
+[project]
+name = "eml2pdf"
+version = "0.1.0"
+description = "CLI tool to extract PDF attachments and convert email bodies from .eml files to PDF."
+authors = [{ name = "Your Name", email = "your@email.com" }]
+dependencies = [
+    "weasyprint>=60.1",
+]
+
+[project.scripts]
+eml2pdf = "eml2pdf:main"

@@ -1,0 +1,33 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Logs
+*.log
+logs/
+
+# Output folders
+output/
+
+# macOS noise
+.DS_Store
+
+# Virtual environments
+.venv/
+.env/
+env/
+
+# IDE/editor files
+.vscode/
+.idea/
+
+# Compiled files
+*.egg-info/
+dist/
+build/
+
+# Misc
+*.zip
