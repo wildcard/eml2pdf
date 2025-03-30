@@ -111,7 +111,7 @@ def process_eml_file(eml_path: Path, output_dir: Path):
         pdf_path = output_dir / f"{eml_name}.pdf"
         log_path = LOG_DIR / f"render_fail_{eml_name}.log"
 
-        # Extract text for amount/date
+        # Extract amount + invoice date
         try:
             if "html" in msg.get_content_type():
                 soup = BeautifulSoup(body, "html.parser")
@@ -122,7 +122,7 @@ def process_eml_file(eml_path: Path, output_dir: Path):
         except Exception as e:
             print(f"[!] Failed to parse invoice data in {eml_name}: {e}")
 
-        # Render PDF in subprocess
+        # Render body to PDF
         proc = multiprocessing.Process(target=render_pdf_safe, args=(body, pdf_path, log_path))
         proc.start()
         proc.join(timeout=30)
@@ -208,22 +208,26 @@ def main():
                     eml_path.name, "", "", "", "", "", "no", 0, "yes", ""
                 ])
 
-    # Write CSV summary
+    # ✅ Write CSV summary
     report_path = output_dir / "receipt_report.csv"
-    with open(report_path, "w", newline="") as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow([
-            "File", "Vendor", "From", "Subject", "Email Date",
-            "Invoice Date", "Body PDF", "Attachments", "Crashed", "Amount Paid"
-        ])
-        writer.writerows(report_rows)
+    try:
+        with open(report_path, "w", newline="") as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow([
+                "File", "Vendor", "From", "Subject", "Email Date",
+                "Invoice Date", "Body PDF", "Attachments", "Crashed", "Amount Paid"
+            ])
+            writer.writerows(report_rows)
+        print(f"📁 CSV report saved to: {report_path}")
+    except Exception as e:
+        print(f"[!] Failed to write CSV report: {e}")
 
+    # ✅ Final stats
     print(f"\n📊 Processing Complete:")
     print(f"   • Total .eml files processed: {total}")
     print(f"   • PDF attachments extracted: {attachments}")
     print(f"   • Email bodies converted to PDF: {body_pdfs}")
     print(f"   • Failures: {failed}")
-    print(f"   • CSV report saved to: {report_path}")
 
 if __name__ == "__main__":
     main()
