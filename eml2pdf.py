@@ -4,7 +4,10 @@ from email import policy
 from pathlib import Path
 import multiprocessing
 import traceback
+import os
 from weasyprint import HTML
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from tqdm import tqdm
 
 LOG_DIR = Path("logs")
 LOG_DIR.mkdir(exist_ok=True)
@@ -20,8 +23,12 @@ def render_pdf_safe(body_html, pdf_path, log_path):
         print(f"[!] Failed to render PDF: {pdf_path.name} (logged to {log_path.name})")
 
 def process_eml_file(eml_path: Path, output_dir: Path):
-    with open(eml_path, 'rb') as f:
-        msg = email.message_from_binary_file(f, policy=policy.default)
+    try:
+        with open(eml_path, 'rb') as f:
+            msg = email.message_from_binary_file(f, policy=policy.default)
+    except Exception as e:
+        print(f"[!] Failed to open {eml_path.name}: {e}")
+        return 0, False, True  # attachments, rendered, crashed
 
     eml_name = eml_path.stem
     extracted = 0
@@ -39,7 +46,7 @@ def process_eml_file(eml_path: Path, output_dir: Path):
             print(f"[+] Extracted attachment: {attachment_path.name}")
             extracted += 1
 
-    # Extract body content
+    # Extract email body
     body = None
     if msg.is_multipart():
         for part in msg.walk():
@@ -91,19 +98,30 @@ def main():
         print("No .eml files found.")
         return
 
-    total = 0
+    total = len(eml_files)
     attachments = 0
     body_pdfs = 0
     failed = 0
+    num_workers = os.cpu_count() or 4
 
-    for eml_file in eml_files:
-        total += 1
-        print(f"Processing {eml_file.name}...")
-        extracted, rendered, error = process_eml_file(eml_file, output_dir)
+    print(f"⚙️ Processing {total} files with {num_workers} workers...\n")
 
-        attachments += extracted
-        body_pdfs += int(rendered)
-        failed += int(error)
+    with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        futures = {
+            executor.submit(process_eml_file, eml_path, output_dir): eml_path
+            for eml_path in eml_files
+        }
+
+        for future in tqdm(as_completed(futures), total=len(futures), desc="Processing"):
+            eml_path = futures[future]
+            try:
+                extracted, rendered, error = future.result()
+                attachments += extracted
+                body_pdfs += int(rendered)
+                failed += int(error)
+            except Exception as e:
+                print(f"[!] Exception while processing {eml_path.name}: {e}")
+                failed += 1
 
     print("\n📊 Processing Complete:")
     print(f"   • Total .eml files processed: {total}")

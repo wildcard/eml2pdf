@@ -5,6 +5,7 @@ description = "CLI tool to extract PDF attachments and convert email bodies from
 authors = [{ name = "Your Name", email = "your@email.com" }]
 dependencies = [
     "weasyprint>=60.1",
+    "tqdm"
 ]
 
 [project.scripts]
