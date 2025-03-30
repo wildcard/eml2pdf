@@ -39,15 +39,24 @@ export DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib:$DYLD_FALLBACK_LIBRARY_PATH
 ```
 
 # Clone the project
-git clone https://github.com/your-username/eml2pdf.git
+
+```bash
+git clone https://github.com/wildcard/eml2pdf.git
 cd eml2pdf
+```
 
 # Set up environment
+
+```bash
 uv venv
 source .venv/bin/activate
+```
 
 # Install the tool in editable mode
+
+```bash
 uv pip install -e .
+```
 
 # 🚀 Usage
 
