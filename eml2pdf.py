@@ -1,12 +1,10 @@
-import os
 import argparse
-from pathlib import Path
 import email
 from email import policy
-from weasyprint import HTML
+from pathlib import Path
 import multiprocessing
 import traceback
-import logging
+from weasyprint import HTML
 
 LOG_DIR = Path("logs")
 LOG_DIR.mkdir(exist_ok=True)
@@ -26,8 +24,11 @@ def process_eml_file(eml_path: Path, output_dir: Path):
         msg = email.message_from_binary_file(f, policy=policy.default)
 
     eml_name = eml_path.stem
+    extracted = 0
+    rendered = False
+    crashed = False
 
-    # Extract and save PDF attachments
+    # Extract PDF attachments
     for part in msg.iter_attachments():
         filename = part.get_filename()
         content_type = part.get_content_type()
@@ -36,8 +37,9 @@ def process_eml_file(eml_path: Path, output_dir: Path):
             with open(attachment_path, 'wb') as f:
                 f.write(part.get_payload(decode=True))
             print(f"[+] Extracted attachment: {attachment_path.name}")
+            extracted += 1
 
-    # Prepare email body for PDF
+    # Extract body content
     body = None
     if msg.is_multipart():
         for part in msg.walk():
@@ -61,10 +63,15 @@ def process_eml_file(eml_path: Path, output_dir: Path):
         proc.start()
         proc.join(timeout=30)
 
-        if proc.exitcode != 0:
+        if proc.exitcode == 0:
+            rendered = True
+        else:
+            crashed = True
             print(f"[!] PDF rendering crashed for {eml_name} — see log: {log_path.name}")
     else:
         print(f"[!] No body content in {eml_name}")
+
+    return extracted, rendered, crashed
 
 def main():
     parser = argparse.ArgumentParser(description="Extract PDF attachments and convert EML bodies to PDF.")
@@ -84,9 +91,25 @@ def main():
         print("No .eml files found.")
         return
 
+    total = 0
+    attachments = 0
+    body_pdfs = 0
+    failed = 0
+
     for eml_file in eml_files:
+        total += 1
         print(f"Processing {eml_file.name}...")
-        process_eml_file(eml_file, output_dir)
+        extracted, rendered, error = process_eml_file(eml_file, output_dir)
+
+        attachments += extracted
+        body_pdfs += int(rendered)
+        failed += int(error)
+
+    print("\n📊 Processing Complete:")
+    print(f"   • Total .eml files processed: {total}")
+    print(f"   • PDF attachments extracted: {attachments}")
+    print(f"   • Email bodies converted to PDF: {body_pdfs}")
+    print(f"   • Failures: {failed}")
 
 if __name__ == "__main__":
     main()
